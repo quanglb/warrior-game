@@ -1,3 +1,6 @@
+using System;
+using _Game.Scripts;
+using _Game.Scripts.Gameplay;
 using UnityEngine;
 
 public class HealthSystemForDummies : MonoBehaviour
@@ -9,19 +12,20 @@ public class HealthSystemForDummies : MonoBehaviour
     public bool HasAnimationWhenHealthChanges = true;
     public float AnimationDuration = 0.1f;
 
-    public float CurrentHealthPercentage
-    {
-        get
-        {
-            return (CurrentHealth / MaximumHealth) * 100;
-        }
-    }
+    public float CurrentHealthPercentage => (CurrentHealth / MaximumHealth) * 100;
 
     public OnCurrentHealthChanged OnCurrentHealthChanged;
     public OnIsAliveChanged OnIsAliveChanged;
     public OnMaximumHealthChanged OnMaximumHealthChanged;
 
     public GameObject HealthBarPrefabToSpawn;
+    
+    private ITroop owner;
+
+    private void Awake()
+    {
+        owner = GetComponent<ITroop>();
+    }
 
     public void AddToMaximumHealth(float value)
     {
@@ -76,9 +80,13 @@ public class HealthSystemForDummies : MonoBehaviour
     {
         CurrentHealth -= value;
 
+        Debug.Log("CurrentHealth: " + CurrentHealth);
         if (CurrentHealth <= 0)
         {
             IsAlive = false;
+            
+            StartCoroutine(owner.SetDead(!IsAlive));
+            
             OnIsAliveChanged.Invoke(IsAlive);
         }
     }

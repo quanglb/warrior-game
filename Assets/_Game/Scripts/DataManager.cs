@@ -1,9 +1,27 @@
+using System;
 using UnityEngine;
 
 namespace _Game.Scripts
 {
     public static class DataManager
     {
+        public const string COIN = "coin";
+        public static event Action<int> OnChangeCoin = delegate(int _coin) { };
+        public static int currCoin;
+
+        public static void SetCoin(int coinValue)
+        {
+            PlayerPrefs.SetInt(COIN, coinValue);
+            PlayerPrefs.Save();
+            currCoin = coinValue;
+            OnChangeCoin(coinValue);
+        }
+
+        public static int GetCoin()
+        {
+            return PlayerPrefs.GetInt(COIN, 10);
+        }
+        
         public static int Level
         {
             get => PlayerPrefs.GetInt(DataKey.PlayerLevel.ToString(), 1);
@@ -19,7 +37,7 @@ namespace _Game.Scripts
             get => PlayerPrefs.GetInt(DataKey.TowerLevel.ToString(), 1);
             set
             {
-                PlayerPrefs.GetInt(DataKey.TowerLevel.ToString(), value);
+                PlayerPrefs.SetInt(DataKey.TowerLevel.ToString(), value);
                 PlayerPrefs.Save();
             }
         }

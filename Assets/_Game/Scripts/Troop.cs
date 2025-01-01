@@ -1,17 +1,20 @@
-using System.ComponentModel;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using _Game.Scripts.Gameplay;
+using DG.Tweening;
 using Spine.Unity;
 using UnityEngine;
 
 namespace _Game.Scripts
 {
-    public class Unit : MonoBehaviour
+    public class Troop : ITroop
     {
-        public Team team;
         public TroopClass troopClass;
 
         public int initialHealth = 8;
         public HealthSystemForDummies healthBar;
-        public Unit target;
+        public ITroop target;
         [Header("Animation")] public SkeletonAnimation skeletonAnimation;
 
         [SerializeField] [SpineAnimation(dataField = "skeletonAnimation")]
@@ -23,16 +26,20 @@ namespace _Game.Scripts
         [SerializeField] [SpineAnimation(dataField = "skeletonAnimation")]
         protected string deadAnim;
 
+        [SerializeField] [SpineAnimation(dataField = "skeletonAnimation")]
+        protected string idleAnim;
+
         [Header("Stats")] [Tooltip("How many hits per second")]
         public float attackInterval = 1.5f;
 
         protected float attackAnimSpeed = 1;
         protected float attackTimer;
         public float attackRange;
+        public uint dmg;
         public float aoeRadius;
         public uint AOEDmg;
         public float startingY;
-        public bool isDead;
+
         public float movementSpeed = .5f;
         public LayerMask castMask;
 
@@ -48,9 +55,11 @@ namespace _Game.Scripts
 
         [Header("Status")] protected float freezeTimer;
 
-        private void Start()
+        protected virtual void Start()
         {
             rigidbody2D = GetComponent<Rigidbody2D>();
+
+            Setup();
         }
 
         private void Setup()
@@ -123,56 +132,54 @@ namespace _Game.Scripts
 
         protected virtual void MoveForward()
         {
-            if (skeletonAnimation.AnimationState.GetCurrent(0) ==
-                null /* || skeletonAnimation.AnimationState.GetCurrent(0).Animation.Name == idleAnims[0]*/)
+            if (skeletonAnimation.AnimationState.GetCurrent(0) ==  null)
                 skeletonAnimation.AnimationState.SetAnimation(0, runAnims, true);
             else
                 skeletonAnimation.AnimationState.AddAnimation(0, runAnims, true, 0f);
-            //rigidbody2D.AddForce(transform.right * movementSpeed * 10f);
+            
             rigidbody2D.velocity = transform.right * movementSpeed;
+            
             if (Mathf.Abs(transform.position.y - startingY) > .1f)
             {
-                //rigidbody2D.AddForce(transform.up * Mathf.Sign(startingY - transform.position.y) * movementSpeed * 10f);
                 rigidbody2D.velocity = transform.up * Mathf.Sign(startingY - transform.position.y) * movementSpeed;
             }
         }
 
         protected void FindClosestTarget()
         {
-            var _tempRange = Mathf.Infinity;
-            RaycastHit2D[] raycastHit2DArray = new RaycastHit2D[5];
-            if (transform == null) return;
-            Physics2D.BoxCastNonAlloc(transform.position - transform.right * 2, boxSize, 0, transform.right,
-                raycastHit2DArray, boxCastRange, castMask);
-            if (raycastHit2DArray[0].transform == null)
-            {
-                target = null;
-                return;
-            }
+            List<ITroop> potentialTargets = team == Team.Player
+                ? LevelManager.Instance.enemies
+                : LevelManager.Instance.players;
 
-            foreach (RaycastHit2D raycastHit in raycastHit2DArray)
+            potentialTargets = potentialTargets.Where(t => t != null && t.gameObject.activeInHierarchy).ToList();
+
+            ITroop closestTarget = null;
+            float closestDistanceSqr = float.MaxValue;
+
+            Vector3 currentPosition = transform.position;
+
+            foreach (var potentialTarget in potentialTargets)
             {
-                if (raycastHit.transform == null)
-                    break;
-                if (Vector2.Distance(transform.position, raycastHit.transform.position) +
-                    (Vector2.up * Mathf.Abs(transform.position.y - raycastHit.transform.position.y)).magnitude <
-                    _tempRange)
+                float distanceSqr = (potentialTarget.transform.position - currentPosition).sqrMagnitude;
+
+                if (distanceSqr < closestDistanceSqr)
                 {
-                    _tempRange = Vector2.Distance(transform.position, raycastHit.transform.position);
-                    target = raycastHit.transform.GetComponent<Unit>();
+                    closestDistanceSqr = distanceSqr;
+                    closestTarget = potentialTarget;
                 }
             }
+
+            target = closestTarget;
         }
 
         protected virtual void MoveToTarget()
         {
-            if (skeletonAnimation.AnimationState.GetCurrent(0) ==
-                null /*|| skeletonAnimation.AnimationState.GetCurrent(0).Animation.Name == idleAnims[0]*/)
+            if (skeletonAnimation.AnimationState.GetCurrent(0) == null)
                 skeletonAnimation.AnimationState.SetAnimation(0, runAnims, true);
             else
                 skeletonAnimation.AnimationState.AddAnimation(0, runAnims, true, 0f);
-            Vector3 direction;
-            direction = (target.transform.position - transform.position + Vector3.up * Random.Range(-.1f, .1f))
+            
+            Vector3 direction = (target.transform.position - transform.position + Vector3.up * Random.Range(-.1f, .1f))
                 .normalized;
             //rigidbody2D.AddForce(direction * movementSpeed * 10f);
             rigidbody2D.velocity = direction * movementSpeed;
@@ -185,10 +192,95 @@ namespace _Game.Scripts
             {
                 attackTimer = 0;
                 if (attackInterval <= skeletonAnimation.Skeleton.Data.FindAnimation(attackAnim).Duration)
+                {
                     skeletonAnimation.AnimationState.SetAnimation(0, attackAnim, false).TimeScale = attackAnimSpeed;
+
+                    skeletonAnimation.AnimationState.AddAnimation(0, idleAnim, true, 0f);
+                }
                 else
+                {
                     skeletonAnimation.AnimationState.SetAnimation(0, attackAnim, false);
+                    skeletonAnimation.AnimationState.AddAnimation(0, idleAnim, true, 0f);
+                }
+
+                DOVirtual.DelayedCall(0.2f, () =>
+                {
+                    if (target != null)
+                    {
+                        target.GetHit(dmg);
+
+                        var spawner = FindObjectOfType<DamageTextSpawner>();
+                        if (spawner != null)
+                        {
+                            spawner.SpawnDamageText(target.transform.position, dmg);
+                        }
+                    }
+                });
             }
+        }
+
+        public override void GetHit(uint _dmg)
+        {
+            if (isDead)
+                return;
+
+            healthBar.AddToCurrentHealth(-_dmg);
+            // if (_dmg > HP)
+            // {
+            //     _dmg = HP;
+            // }
+            // if (!isPlayer)
+            // {
+            //     //Config.GOLD_COLLECTED += _dmg;
+            //     BigDouble goldCollectValue = goldValue / maxHP * _dmg;
+            //     CoinDropPool.Instance.Spawn(transform.position, (uint)goldCollectValue);
+            //     Config.HIDDEN_GOLD_COLLECTED += goldCollectValue;
+            // }
+            // else
+            // {
+            //     LevelManager.Instance.PlayCameraShake(AssetsManager.Instance.damageHallShakePreset);
+            // }
+            // HP -= (uint)_dmg;
+            // HPFill.fillAmount = (float)HP / (float)maxHP;
+            // HPTxt.text = HP.ToString();
+            //
+            // if (HP <= 0)
+            // {
+            //     LevelManager.Instance.PlayCameraShake(AssetsManager.Instance.endGameShakePreset);
+            //     isDead = true;
+            //     var deadFX = Instantiate(AssetsManager.Instance.baseDead, transform.position, Quaternion.identity);
+            //     deadFX.GetComponent<ParticleSystem>().Play();
+            //     AudioManager.Instance.PlaySound2D(Sounds.BaseDead);
+            //     EventDispatcher.Instance.PostEvent(EventID.EndLevel, !isPlayer);
+            //     Destroy(gameObject);
+            // }
+        }
+
+        public override IEnumerator SetDead(bool val)
+        {
+            isDead = val;
+            if (team == Team.Enemy)
+            {
+                var goldSpawner = FindObjectOfType<GoldSpawner>();
+                if (goldSpawner != null)
+                {
+                    int goldAmount = Random.Range(1, 10);
+                    goldSpawner.SpawnGold(transform.position, goldAmount);
+                }
+            }
+
+            LevelManager.Instance.Remove(this);
+
+            var entry = skeletonAnimation.AnimationState.SetAnimation(0, deadAnim, false);
+
+            while (entry != null && !entry.IsComplete)
+            {
+                yield return null;
+            }
+
+            Destroy(gameObject);
+
+            Debug.Log($"<color=red>{gameObject.name}</color> Is Dead = {val}");
         }
     }
 }
